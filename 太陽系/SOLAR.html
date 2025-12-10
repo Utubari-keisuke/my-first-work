@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar System: Orion Visible</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; }
+        
+        #info {
+            position: absolute; top: 20px; width: 100%; text-align: center; 
+            color: #88ccff; font-family: 'Courier New', sans-serif; font-weight: bold;
+            pointer-events: none; letter-spacing: 4px; font-size: 14px;
+            text-shadow: 0 0 10px #0088ff; opacity: 0.9;
+        }
+        
+        #nav-panel {
+            position: absolute; top: 60px; right: 20px; width: 220px;
+            background: rgba(0, 5, 15, 0.6);
+            border-right: 2px solid rgba(68, 136, 255, 0.5);
+            border-bottom: 1px solid rgba(68, 136, 255, 0.2);
+            padding: 10px;
+            font-family: 'Courier New', sans-serif;
+            color: #aaddff;
+            max-height: 70vh;
+            overflow-y: auto;
+            backdrop-filter: blur(4px);
+        }
+        #nav-panel h3 {
+            margin: 0 0 10px 0; font-size: 14px; text-align: center; 
+            border-bottom: 1px solid rgba(68, 136, 255, 0.3); padding-bottom: 5px; letter-spacing: 2px;
+        }
+        .nav-group { margin-bottom: 15px; }
+        .nav-group-title { font-size: 10px; color: #6688aa; margin-bottom: 3px; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .target-btn {
+            display: block; width: 100%; padding: 5px 8px; margin-bottom: 2px;
+            background: transparent; border: none; border-left: 2px solid transparent;
+            color: #88aaff; cursor: pointer; text-align: left; font-size: 13px;
+            transition: all 0.2s; font-family: 'Courier New', sans-serif;
+        }
+        .target-btn:hover { background: rgba(0, 100, 255, 0.1); border-left: 2px solid #44aaff; color: #ffffff; }
+        .target-btn.active { background: rgba(0, 100, 255, 0.2); border-left: 2px solid #00ffff; color: #00ffff; text-shadow: 0 0 5px #00ffff; }
+        
+        .warp-active { border-left: 2px solid #ff4444 !important; color: #ffaaaa !important; }
+        .orion-btn { border-left: 2px solid #ff8844 !important; color: #ffccaa !important; background: rgba(60,20,0,0.2); }
+        .nebula-btn { border-left: 2px solid #ff00ff !important; color: #ffccff !important; background: rgba(50,0,50,0.2); }
+
+        #reset-btn {
+            width: 100%; padding: 6px; background: rgba(200, 50, 50, 0.2); 
+            border: 1px solid rgba(255, 80, 80, 0.4); color: #ffaaaa;
+            font-size: 12px; cursor: pointer; margin-top: 10px; transition: all 0.2s;
+        }
+        #reset-btn:hover { background: rgba(200, 50, 50, 0.5); color: #fff; }
+
+        #data-monitor {
+            position: absolute; bottom: 80px; left: 20px; width: 320px;
+            background: rgba(0, 10, 20, 0.85);
+            border-left: 4px solid #00ffff;
+            border-top: 1px solid rgba(0, 255, 255, 0.3);
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            color: #00ffff;
+            backdrop-filter: blur(5px);
+            display: none;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.15);
+        }
+        #data-monitor h2 {
+            margin: 0 0 10px 0; font-size: 24px; letter-spacing: 2px;
+            text-shadow: 0 0 8px #00ffff; border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+            padding-bottom: 5px;
+        }
+        .data-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 12px; }
+        .data-label { color: #88aaff; }
+        .data-val { color: #ffffff; font-weight: bold; text-align: right; }
+        #data-desc {
+            margin-top: 15px; font-size: 13px; line-height: 1.4; color: #ccffff;
+            border-top: 1px dashed rgba(0, 255, 255, 0.3); padding-top: 10px;
+            min-height: 60px;
+        }
+        .cursor { display: inline-block; width: 8px; height: 14px; background: #00ffff; animation: blink 1s infinite; vertical-align: middle; }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+        #bottom-panel {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px;
+        }
+        #time-panel {
+            width: 300px; height: 40px;
+            background: rgba(0, 10, 20, 0.8);
+            border: 1px solid #4488ff; border-radius: 20px;
+            display: flex; align-items: center; justify-content: center;
+            backdrop-filter: blur(5px); padding: 0 15px;
+            color: #00ffff; font-family: 'Courier New', sans-serif; font-size: 12px;
+        }
+        .toggle-btn {
+            height: 40px; padding: 0 15px;
+            background: rgba(0, 50, 20, 0.8);
+            border: 1px solid #00ff88; border-radius: 20px;
+            color: #00ff88; font-family: 'Courier New', sans-serif; font-size: 12px;
+            cursor: pointer; display: flex; align-items: center;
+            transition: all 0.2s;
+        }
+        .toggle-btn:hover { background: rgba(0, 80, 40, 0.9); box-shadow: 0 0 10px #00ff88; }
+        .toggle-btn.off { border-color: #666; color: #888; background: rgba(20,20,20,0.8); }
+        #time-slider { width: 150px; margin: 0 15px; cursor: pointer; }
+        .time-label { width: 50px; text-align: center; }
+        
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #4488ff; border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="info">SYSTEM: ORION VISIBILITY BOOSTED</div>
+    
+    <div id="nav-panel">
+        <h3>NAVIGATION</h3>
+        <div id="target-list"></div>
+        <button id="reset-btn">SOLAR SYSTEM RESET</button>
+    </div>
+
+    <div id="data-monitor">
+        <h2 id="monitor-name">TARGET</h2>
+        <div class="data-row"><span class="data-label">CLASS:</span><span class="data-val" id="monitor-class">-</span></div>
+        <div class="data-row"><span class="data-label">SIZE:</span><span class="data-val" id="monitor-size">-</span></div>
+        <div class="data-row"><span class="data-label">TEMP/STATUS:</span><span class="data-val" id="monitor-temp">-</span></div>
+        <div class="data-row"><span class="data-label">DISTANCE:</span><span class="data-val" id="monitor-dist">-</span></div>
+        <div id="data-desc"></div>
+    </div>
+
+    <div id="bottom-panel">
+        <button id="hz-toggle" class="toggle-btn off">HABITABLE ZONE: OFF</button>
+        <button id="cam-toggle" class="toggle-btn off">AUTO-CAM: OFF</button>
+        <div id="time-panel">
+            <span class="time-label">PAUSE</span>
+            <input type="range" id="time-slider" min="0" max="5.0" step="0.1" value="1.0">
+            <span class="time-label" id="speed-display">1.0x</span>
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // --- Lore Database ---
+        const infoDatabase = {
+            "Mercury": { class: "Terrestrial Planet", size: "4,880 km", temp: "167°C", desc: "Closest to the Sun. Heavily cratered surface." },
+            "Venus": { class: "Terrestrial Planet", size: "12,104 km", temp: "464°C", desc: "Hottest planet due to greenhouse effect." },
+            "Earth": { class: "Terrestrial Planet", size: "12,742 km", temp: "15°C", desc: "Our home. Located in the Sun's habitable zone." },
+            "Mars": { class: "Terrestrial Planet", size: "6,779 km", temp: "-65°C", desc: "The Red Planet. Just outside the habitable zone." },
+            "Jupiter": { class: "Gas Giant", size: "139,820 km", temp: "-110°C", desc: "Massive gas giant with the Great Red Spot." },
+            "Saturn": { class: "Gas Giant", size: "116,460 km", temp: "-140°C", desc: "Famous for its spectacular ring system." },
+            "Uranus": { class: "Ice Giant", size: "50,724 km", temp: "-195°C", desc: "Rotates on its side. Coldest atmosphere." },
+            "Neptune": { class: "Ice Giant", size: "49,244 km", temp: "-200°C", desc: "Winds speeds can reach supersonic levels." },
+            "Pluto": { class: "Dwarf Planet", size: "2,377 km", temp: "-229°C", desc: "King of the Kuiper Belt." },
+            "Haumea": { class: "Dwarf Planet", size: "1,600 km", temp: "-241°C", desc: "Egg-shaped due to rapid rotation." },
+            "Eris": { class: "Dwarf Planet", size: "2,326 km", temp: "-243°C", desc: "Massive dwarf planet in the scattered disc." },
+            "Sedna": { class: "TNO", size: "1,000 km", temp: "-240°C", desc: "Extremely distant object with a reddish hue." },
+            "Voyager 1": { class: "Space Probe", size: "722 kg", temp: "Active", desc: "Furthest man-made object. Interstellar." },
+            "Alpha Centauri A": { class: "G-type Star", size: "1.22 Solar Radii", temp: "5,790 K", desc: "Primary star of the closest system." },
+            "Proxima Centauri": { class: "Red Dwarf Star", size: "0.15 Solar Radii", temp: "3,042 K", desc: "Closest star. Has a very close habitable zone." },
+            "Proxima b": { class: "Exoplanet", size: "~1.1 Earths", temp: "-39°C (Eq)", desc: "Potentially habitable planet orbiting Proxima." },
+            "Sirius A": { class: "A-type Main Seq", size: "1.7 Solar Radii", temp: "9,940 K", desc: "Brightest star in the sky." },
+            "Gliese 710": { class: "Orange Dwarf Star", size: "~60% of Sun", temp: "4,250 K", desc: "Future encounter star (1.3M years)." },
+            "Black Hole": { class: "Singularity", size: "Event Horizon", temp: "N/A", desc: "Region of infinite density." },
+            "Pulsar": { class: "Neutron Star", size: "20 km", temp: "1,000,000 K", desc: "Rapidly spinning neutron star emitting beams." },
+            "Halley's Comet": { class: "Comet", size: "11 km", temp: "Sublimating", desc: "Famous periodic comet." },
+            "TRAPPIST-1": { class: "Ultra-cool Dwarf", size: "0.11 Solar Radii", temp: "2,566 K", desc: "Hosts 7 Earth-sized planets." },
+            "TRAPPIST-1e": { class: "Exoplanet", size: "0.92 Earths", temp: "-22°C (Eq)", desc: "The most Earth-like candidate." },
+            "Orion Nebula": { class: "Diffuse Nebula", size: "24 Light Years", temp: "10,000 K", desc: "A stellar nursery." },
+            "Crab Nebula": { class: "Supernova Remnant", size: "11 Light Years", temp: "N/A", desc: "Supernova remnant." },
+            // ORION
+            "Orion Constellation": { class: "Constellation", size: "~500 Light Years", temp: "Various", desc: "The Hunter. Visible from Earth." },
+            "Betelgeuse": { class: "Red Supergiant", size: "~1000 Solar Radii", temp: "3,500 K", desc: "Red Supergiant at the shoulder." },
+            "Rigel": { class: "Blue Supergiant", size: "79 Solar Radii", temp: "12,100 K", desc: "Blue Supergiant at the foot." },
+            "Alnitak": { class: "Blue Supergiant", size: "20 Solar Radii", temp: "29,500 K", desc: "Belt Star (East)." },
+            "Alnilam": { class: "Blue Supergiant", size: "42 Solar Radii", temp: "27,000 K", desc: "Belt Star (Center)." },
+            "Mintaka": { class: "Blue Giant", size: "24 Solar Radii", temp: "29,000 K", desc: "Belt Star (West)." }
+        };
+
+        function createPlanetTexture(baseColorHex, type) {
+            const size = 512; const canvas = document.createElement('canvas');
+            canvas.width = size; canvas.height = size; const ctx = canvas.getContext('2d');
+            const baseColor = new THREE.Color(baseColorHex);
+            ctx.fillStyle = `#${baseColor.getHexString()}`; ctx.fillRect(0, 0, size, size);
+            if (type === 'gas') {
+                for (let i = 0; i < 15; i++) {
+                    const y = Math.random() * size; ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.25})`; ctx.fillRect(0, y, size, Math.random() * 80 + 20);
+                }
+            } else if (type === 'rock' || type === 'ice' || type === 'comet') {
+                ctx.fillStyle = 'rgba(0,0,0,0.15)'; for (let i = 0; i < 300; i++) { ctx.beginPath(); ctx.arc(Math.random()*size, Math.random()*size, Math.random()*15, 0, Math.PI*2); ctx.fill(); }
+                if (type === 'comet') { ctx.fillStyle = 'rgba(255,255,255,0.3)'; for(let i=0;i<50;i++) ctx.fillRect(Math.random()*size,Math.random()*size,20,20); }
+            } else if (type === 'star' || type === 'pulsar') {
+                const grad = ctx.createRadialGradient(256,256,0, 256,256,256);
+                const c1 = baseColor.clone().lerp(new THREE.Color(0xffffff), 0.7).getStyle();
+                const c2 = baseColor.getStyle();
+                grad.addColorStop(0, c1); grad.addColorStop(1, c2);
+                ctx.fillStyle = grad; ctx.fillRect(0,0,512,512);
+            }
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // --- GLOW SPRITE GENERATOR (KEY FOR VISIBILITY) ---
+        function createGlowTexture(color) {
+            const canvas = document.createElement('canvas'); canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+            gradient.addColorStop(0, new THREE.Color(color).getStyle());
+            gradient.addColorStop(0.2, new THREE.Color(color).getStyle()); // Core
+            gradient.addColorStop(0.5, 'rgba(0,0,0,0.1)');
+            gradient.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, 64, 64);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // --- Setup ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x000000, 0.00001);
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 1, 1000000); 
+        const initialCamPos = new THREE.Vector3(0, 1500, 3000); camera.position.copy(initialCamPos);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.3;
+        renderer.setSize(window.innerWidth, window.innerHeight); document.body.appendChild(renderer.domElement);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true; controls.dampingFactor = 0.05; controls.maxDistance = 500000;
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        composer.addPass(new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.5, 0.7));
+
+        // --- Coordinates ---
+        const ALPHA_OFFSET = new THREE.Vector3(100000, 0, 0); 
+        const PROXIMA_OFFSET = new THREE.Vector3(115000, 5000, 10000);
+        const TRAPPIST_OFFSET = new THREE.Vector3(80000, 60000, -80000); 
+        const GLIESE_OFFSET = new THREE.Vector3(-60000, 0, 0);
+        const SIRIUS_OFFSET = new THREE.Vector3(50000, 40000, 50000);
+        const BLACKHOLE_OFFSET = new THREE.Vector3(-150000, -20000, 50000);
+        const PULSAR_OFFSET = new THREE.Vector3(-200000, 50000, -100000);
+        const NEBULA1_OFFSET = new THREE.Vector3(-50000, 80000, 50000);
+        const NEBULA2_OFFSET = new THREE.Vector3(120000, -50000, -20000);
+        const ORION_OFFSET = new THREE.Vector3(-150000, 80000, 150000);
+
+        // --- Lights ---
+        scene.add(new THREE.AmbientLight(0x222222, 0.5));
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x080820, 0.3); scene.add(hemiLight);
+        const sunLight = new THREE.PointLight(0xffffff, 6.0, 60000); scene.add(sunLight); 
+        const aLight = new THREE.PointLight(0xffaa00, 4.0, 20000); aLight.position.copy(ALPHA_OFFSET); scene.add(aLight);
+        const pLight = new THREE.PointLight(0xff4400, 3.0, 10000); pLight.position.copy(PROXIMA_OFFSET); scene.add(pLight);
+        const tLight = new THREE.PointLight(0xff2200, 4.0, 20000); tLight.position.copy(TRAPPIST_OFFSET); scene.add(tLight); 
+        const gLight = new THREE.PointLight(0xffaa55, 3.5, 20000); gLight.position.copy(GLIESE_OFFSET); scene.add(gLight);
+        const sLight = new THREE.PointLight(0xaaccff, 5.0, 30000); sLight.position.copy(SIRIUS_OFFSET); scene.add(sLight);
+        const bLight = new THREE.PointLight(0xaa00ff, 5.0, 40000); bLight.position.copy(BLACKHOLE_OFFSET); scene.add(bLight);
+        const puLight = new THREE.PointLight(0x00ffff, 5.0, 40000); puLight.position.copy(PULSAR_OFFSET); scene.add(puLight);
+        const n1Light = new THREE.PointLight(0xff0088, 3.0, 30000); n1Light.position.copy(NEBULA1_OFFSET); scene.add(n1Light);
+        const oLight = new THREE.PointLight(0xff4400, 5.0, 50000); oLight.position.copy(ORION_OFFSET); scene.add(oLight);
+
+        // --- Objects Creation ---
+        function createPoints(count, rangeMin, rangeMax, color, size, opacity, shape, offset = new THREE.Vector3(0,0,0), scaleY = 1) {
+            const geo = new THREE.BufferGeometry(); const pos = []; const cols = [];
+            for(let i=0; i<count; i++) {
+                const r = Math.random() * (rangeMax - rangeMin) + rangeMin;
+                const theta = Math.random() * Math.PI * 2;
+                let x, y, z;
+                if (shape === 'sphere') { 
+                    const phi = Math.acos(2 * Math.random() - 1);
+                    x = r * Math.sin(phi) * Math.cos(theta); y = r * Math.sin(phi) * Math.sin(theta); z = r * Math.cos(phi);
+                } else if (shape === 'cloud') { 
+                    x = (Math.random()-0.5) * rangeMax; y = (Math.random()-0.5) * rangeMax; z = (Math.random()-0.5) * rangeMax;
+                } else { 
+                    const spread = shape === 'thin' ? 20 : 40;
+                    x = Math.cos(theta)*r; y = (Math.random() - 0.5) * spread * scaleY; z = Math.sin(theta)*r;
+                }
+                pos.push(x + offset.x, y + offset.y, z + offset.z);
+                if (color === 'random') {
+                    const t = Math.random(); cols.push(t>0.6?0.6:t>0.3?0.5:0.3, t>0.6?0.5:t>0.3?0.5:0.3, t>0.6?0.4:t>0.3?0.5:0.3);
+                } else if (color === 'ice') { cols.push(0.5, 0.7, 1.0); }
+            }
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            if(cols.length>0) geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+            const mat = new THREE.PointsMaterial({ size: size, color: cols.length>0?0xffffff:color, vertexColors: cols.length>0, transparent: true, opacity: opacity, blending: THREE.AdditiveBlending, sizeAttenuation: true });
+            const mesh = new THREE.Points(geo, mat); scene.add(mesh); return mesh;
+        }
+
+        // Backgrounds
+        createPoints(15000, 2000, 60000, 0xffffff, 3.0, 0.9, 'sphere');
+        const asteroidBelt = createPoints(4000, 145, 175, 'random', 2.0, 0.8, 'thin');
+        const kuiperBelt = createPoints(3000, 450, 800, 'ice', 1.8, 0.5, 'thick');
+        const oortCloud = createPoints(15000, 5000, 50000, 0xaaaaaa, 6.0, 0.15, 'sphere');
+        
+        const mwCount = 20000; const mwGeo = new THREE.BufferGeometry(); const mwPos = []; const mwCol = [];
+        for(let i=0; i<mwCount; i++) {
+            const r = Math.random() * 100000 + 20000; const theta = Math.random() * Math.PI * 2; const y = (Math.random() - 0.5) * 8000;
+            const cType = Math.random(); if(cType > 0.7) mwCol.push(0.5, 0.2, 0.8); else if (cType > 0.4) mwCol.push(0.2, 0.4, 0.9); else mwCol.push(0.8, 0.8, 0.9);
+            mwPos.push(r * Math.cos(theta), y, r * Math.sin(theta));
+        }
+        mwGeo.setAttribute('position', new THREE.Float32BufferAttribute(mwPos, 3)); mwGeo.setAttribute('color', new THREE.Float32BufferAttribute(mwCol, 3));
+        const mwMat = new THREE.PointsMaterial({ size: 100, vertexColors: true, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false });
+        const milkyWay = new THREE.Points(mwGeo, mwMat); milkyWay.rotation.x = Math.PI / 3; milkyWay.rotation.z = Math.PI / 6; scene.add(milkyWay);
+
+        createPoints(2000, 0, 5000, 0xff0088, 30.0, 0.05, 'cloud', NEBULA1_OFFSET);
+        createPoints(1000, 0, 3000, 0xffccff, 20.0, 0.1, 'cloud', NEBULA1_OFFSET);
+        createPoints(2000, 0, 4000, 0x00ffaa, 30.0, 0.05, 'cloud', NEBULA2_OFFSET);
+        createPoints(2000, 1000, 10000, 0xaaaaff, 3.0, 0.8, 'sphere', ORION_OFFSET);
+
+        const sun = new THREE.Mesh(new THREE.IcosahedronGeometry(30, 10), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+        sun.add(new THREE.Mesh(new THREE.SphereGeometry(35, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff4400, side: THREE.BackSide, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending })));
+        sunLight.add(sun);
+
+        const hzMaterial = new THREE.MeshBasicMaterial({ color: 0x00ff88, side: THREE.DoubleSide, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false }); 
+        const hzGeos = [];
+        function addHZ(radius, width, parent) {
+            const geo = new THREE.RingGeometry(radius - width, radius + width, 128);
+            const mesh = new THREE.Mesh(geo, hzMaterial); mesh.rotation.x = Math.PI / 2; parent.add(mesh); hzGeos.push(mesh);
+        }
+        addHZ(100, 15, scene); 
+        
+        let trackableObjects = []; let currentTarget = null; let isFlying = false; let isAutoCam = false;
+        let flyStartTime = 0; let flyDuration = 2.0;
+        let flyStartPos = new THREE.Vector3(); let flyEndPos = new THREE.Vector3(); let flyStartTarget = new THREE.Vector3(); let flyEndTarget = new THREE.Vector3();
+
+        // --- ORION SECTOR (SCALED & GLOWING) ---
+        const orionGroup = new THREE.Group(); orionGroup.position.copy(ORION_OFFSET); scene.add(orionGroup);
+        
+        // Function to create a glowing star (Sprite + Mesh)
+        function createGlowingStar(size, color, x, y, z) {
+            const group = new THREE.Group();
+            group.position.set(x, y, z);
+            
+            // 3D Mesh (Scaled up for visibility)
+            const mesh = new THREE.Mesh(new THREE.IcosahedronGeometry(size, 8), new THREE.MeshBasicMaterial({ color: color, map: createPlanetTexture(color, 'star') }));
+            group.add(mesh);
+            
+            // Glow Sprite (Billboarding for visibility from far away)
+            const spriteMat = new THREE.SpriteMaterial({ map: createGlowTexture(color), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+            const sprite = new THREE.Sprite(spriteMat);
+            sprite.scale.set(size * 6, size * 6, 1);
+            group.add(sprite);
+            
+            return { group: group, mesh: mesh, sprite: sprite };
+        }
+
+        // 1. Betelgeuse (Red)
+        const betelData = createGlowingStar(2500, 0xff3300, -15000, 20000, 0); // Scaled coords
+        orionGroup.add(betelData.group);
+
+        // 2. Bellatrix (Blue)
+        const bellatrixData = createGlowingStar(1000, 0x88ccff, 15000, 18000, 0);
+        orionGroup.add(bellatrixData.group);
+
+        // 3. Belt Stars
+        const alnitakData = createGlowingStar(1500, 0x88aaff, -6000, 0, 0); orionGroup.add(alnitakData.group);
+        const alnilamData = createGlowingStar(1600, 0x88aaff, 0, 0, 0); orionGroup.add(alnilamData.group);
+        const mintakaData = createGlowingStar(1500, 0x88aaff, 6000, 0, 0); orionGroup.add(mintakaData.group);
+
+        // 4. Saiph (Blue)
+        const saiphData = createGlowingStar(1200, 0x88ccff, -12000, -20000, 0);
+        orionGroup.add(saiphData.group);
+
+        // 5. Rigel (Blue Supergiant)
+        const rigelData = createGlowingStar(2000, 0xaaccff, 12000, -22000, 0);
+        orionGroup.add(rigelData.group);
+
+        // 6. Constellation Lines
+        const points = [
+            betelData.group.position, alnitakData.group.position,
+            bellatrixData.group.position, mintakaData.group.position,
+            alnitakData.group.position, alnilamData.group.position, alnilamData.group.position, mintakaData.group.position,
+            alnitakData.group.position, saiphData.group.position,
+            mintakaData.group.position, rigelData.group.position,
+            betelData.group.position, bellatrixData.group.position,
+            saiphData.group.position, rigelData.group.position
+        ];
+        const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x4488ff, transparent: true, opacity: 0.6, linewidth: 2 });
+        const lines = new THREE.LineSegments(lineGeo, lineMat);
+        orionGroup.add(lines);
+
+        trackableObjects.push({ name: "Orion Constellation", center: ORION_OFFSET, type: 'star', system: 'orion' });
+        trackableObjects.push({ name: "Betelgeuse", mesh: betelData.mesh, type: 'star', system: 'orion', center: ORION_OFFSET });
+        trackableObjects.push({ name: "Rigel", mesh: rigelData.mesh, type: 'star', system: 'orion', center: ORION_OFFSET });
+        trackableObjects.push({ name: "Alnitak", mesh: alnitakData.mesh, type: 'star', system: 'orion', center: ORION_OFFSET });
+
+
+        // --- TRAPPIST-1 System ---
+        const trappistGroup = new THREE.Group(); trappistGroup.position.copy(TRAPPIST_OFFSET); scene.add(trappistGroup);
+        const trappist = new THREE.Mesh(new THREE.IcosahedronGeometry(25, 10), new THREE.MeshBasicMaterial({ color: 0xff2200, map: createPlanetTexture(0x880000, 'star') }));
+        const tFlare = new THREE.Mesh(new THREE.SphereGeometry(30, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.BackSide, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })); trappist.add(tFlare); trappistGroup.add(trappist);
+        addHZ(50, 5, trappist);
+
+        const trapColors = [0x555555, 0xaa8866, 0x4466aa, 0x338833, 0x666666, 0xaa4444, 0x88aaff];
+        const trapNames = ["b", "c", "d", "e", "f", "g", "h"];
+        for(let i=0; i<7; i++) {
+            const dist = 35 + i * 9; 
+            const tPlanet = new THREE.Mesh(new THREE.SphereGeometry(3.0, 32, 32), new THREE.MeshStandardMaterial({ map: createPlanetTexture(trapColors[i], 'rock'), color: 0xffcccc, emissive: trapColors[i], emissiveIntensity: 0.15 }));
+            const tRing = new THREE.Mesh(new THREE.RingGeometry(dist-0.3, dist+0.3, 64), new THREE.MeshBasicMaterial({color:0xaa4422, side:THREE.DoubleSide, transparent:true, opacity:0.2})); tRing.rotation.x = Math.PI/2; trappist.add(tRing);
+            const tpGroup = new THREE.Group(); tpGroup.add(tPlanet); tPlanet.position.x = dist; trappist.add(tpGroup);
+            trackableObjects.push({ name: "TRAPPIST-1" + trapNames[i], mesh: tPlanet, group: tpGroup, type: 'planet', system: 'trappist', dist: dist, speed: 0.05 - i*0.005, angle: Math.random()*10 });
+        }
+        trackableObjects.push({ name: "TRAPPIST-1", mesh: trappist, group: trappistGroup, type: 'star', system: 'trappist', center: TRAPPIST_OFFSET });
+
+        const neb1Core = new THREE.Mesh(new THREE.SphereGeometry(10), new THREE.MeshBasicMaterial({color:0xff0088, transparent:true, opacity:0})); neb1Core.position.copy(NEBULA1_OFFSET); scene.add(neb1Core);
+        const neb2Core = new THREE.Mesh(new THREE.SphereGeometry(10), new THREE.MeshBasicMaterial({color:0x00ffaa, transparent:true, opacity:0})); neb2Core.position.copy(NEBULA2_OFFSET); scene.add(neb2Core);
+        trackableObjects.push({ name: "Orion Nebula", mesh: neb1Core, type: 'star', system: 'nebula', center: NEBULA1_OFFSET });
+        trackableObjects.push({ name: "Crab Nebula", mesh: neb2Core, type: 'star', system: 'nebula', center: NEBULA2_OFFSET });
+
+        // --- Solar System Planets ---
+        const planetsData = [
+            { name: "Mercury", dist: 50, size: 2.5, color: 0xaaaaaa, type: 'rock', speed: 0.04 }, 
+            { name: "Venus", dist: 70, size: 4.5, color: 0xffcc00, type: 'gas', speed: 0.025 }, 
+            { name: "Earth", dist: 100, size: 4.8, color: 0x2266ff, type: 'rock', speed: 0.018, moons: [{name:"Moon", dist:12, size:2.0}] },
+            { name: "Mars", dist: 130, size: 3.0, color: 0xff4422, type: 'rock', speed: 0.014 }, 
+            { name: "Jupiter", dist: 190, size: 14.0, color: 0xccaebb, type: 'gas', speed: 0.006, moons: [{name:"Io", dist:22, size:2.0}] },
+            { name: "Saturn", dist: 260, size: 12.0, color: 0xe0d0a0, type: 'gas', speed: 0.004, ring: true }, 
+            { name: "Uranus", dist: 340, size: 8.0, color: 0x66ccff, type: 'gas', speed: 0.002 },
+            { name: "Neptune", dist: 400, size: 7.8, color: 0x3355ff, type: 'gas', speed: 0.001 }, 
+            { name: "Pluto", dist: 480, size: 2.2, color: 0xddccbb, type: 'rock', speed: 0.0008, inclination: 0.15 },
+            { name: "Haumea", dist: 540, size: 2.0, color: 0xeeeeee, type: 'ice', speed: 0.0007, inclination: 0.2, shape: 'oval' },
+            { name: "Makemake", dist: 600, size: 2.1, color: 0xffaa88, type: 'ice', speed: 0.0006, inclination: 0.25 },
+            { name: "Eris", dist: 750, size: 2.3, color: 0xffffff, type: 'ice', speed: 0.0004, inclination: 0.35 },
+            { name: "Sedna", dist: 1100, size: 3.0, color: 0xaa3322, type: 'rock', speed: 0.0002, inclination: 0.1 }
+        ];
+        const orbitMat = new THREE.MeshBasicMaterial({ color: 0x4466ff, side: THREE.DoubleSide, transparent: true, opacity: 0.15 });
+        planetsData.forEach(data => {
+            const orbitGroup = new THREE.Group();
+            if (data.inclination) { orbitGroup.rotation.z = data.inclination * Math.PI; orbitGroup.rotation.x = Math.random() * 0.2; }
+            scene.add(orbitGroup);
+            const path = new THREE.Mesh(new THREE.RingGeometry(data.dist - 0.4, data.dist + 0.4, 128), orbitMat); path.rotation.x = Math.PI / 2; orbitGroup.add(path);
+            let geo; if(data.shape === 'oval') { geo = new THREE.SphereGeometry(data.size, 32, 32); geo.scale(2.0, 1.0, 1.0); } else { geo = new THREE.SphereGeometry(data.size, 32, 32); }
+            const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: createPlanetTexture(data.color, data.type), roughness: 0.6, emissive: data.color, emissiveIntensity: 0.15 }));
+            orbitGroup.add(mesh);
+            if (data.ring) { const ring = new THREE.Mesh(new THREE.RingGeometry(data.size*1.4, data.size*2.2, 64), new THREE.MeshBasicMaterial({ color: 0xccbb99, side: THREE.DoubleSide, transparent: true, opacity: 0.8 })); ring.rotation.x = Math.PI / 2; mesh.add(ring); }
+            const planetObj = { name: data.name, mesh: mesh, group: orbitGroup, dist: data.dist, speed: data.speed, angle: Math.random() * 10, type: 'planet', isOval: data.shape === 'oval' };
+            trackableObjects.push(planetObj);
+            if(data.moons) { planetObj.moons = []; data.moons.forEach(m => { const mMesh = new THREE.Mesh(new THREE.SphereGeometry(m.size), new THREE.MeshStandardMaterial({ color: 0xcccccc })); orbitGroup.add(mMesh); planetObj.moons.push({ mesh: mMesh, dist: m.dist, speed: 0.05, angle: Math.random() }); }); }
+        });
+
+        const halleyGroup = new THREE.Group(); halleyGroup.rotation.z = THREE.MathUtils.degToRad(160); scene.add(halleyGroup);
+        const halleyPath = new THREE.Mesh(new THREE.RingGeometry(90, 90.5, 128), new THREE.MeshBasicMaterial({color:0x88ffaa, transparent:true, opacity:0.2, side:THREE.DoubleSide})); halleyPath.position.x=60; halleyPath.rotation.x=Math.PI/2; halleyGroup.add(halleyPath);
+        const halleyMesh = new THREE.Mesh(new THREE.SphereGeometry(2.0, 16, 16), new THREE.MeshStandardMaterial({ map: createPlanetTexture(0xccffdd, 'comet'), roughness: 0.4, emissive: 0xccffdd, emissiveIntensity: 0.2 }));
+        const tailGeo = new THREE.ConeGeometry(2, 30, 32, 1, true); const tailMesh = new THREE.Mesh(tailGeo, new THREE.MeshBasicMaterial({ color: 0xccffdd, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending })); tailMesh.rotation.x = -Math.PI/2; tailMesh.position.z = -15; halleyMesh.add(tailMesh); halleyGroup.add(halleyMesh);
+        trackableObjects.push({ name: "Halley's Comet", mesh: halleyMesh, group: halleyGroup, type: 'comet', dist: 0, speed: 0.2, angle: 0, cx: 60, a: 90, b: 30 });
+
+        const centauriGroup = new THREE.Group(); centauriGroup.position.copy(ALPHA_OFFSET); scene.add(centauriGroup);
+        const alphaA = new THREE.Mesh(new THREE.IcosahedronGeometry(32, 10), new THREE.MeshBasicMaterial({ color: 0xffdd88, map: createPlanetTexture(0xffaa00, 'star') }));
+        const alphaAFlare = new THREE.Mesh(new THREE.SphereGeometry(38, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.BackSide, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending })); alphaA.add(alphaAFlare); centauriGroup.add(alphaA);
+        const alphaB = new THREE.Mesh(new THREE.IcosahedronGeometry(24, 10), new THREE.MeshBasicMaterial({ color: 0xffaa55, map: createPlanetTexture(0xff8800, 'star') })); alphaB.add(alphaAFlare.clone());
+        const bOrbit = new THREE.Group(); bOrbit.add(alphaB); alphaB.position.set(200, 0, 0); centauriGroup.add(bOrbit);
+        addHZ(100, 15, alphaA);
+
+        const proximaGroup = new THREE.Group(); proximaGroup.position.copy(PROXIMA_OFFSET); scene.add(proximaGroup);
+        const proxima = new THREE.Mesh(new THREE.IcosahedronGeometry(10, 10), new THREE.MeshBasicMaterial({ color: 0xff2200, map: createPlanetTexture(0xaa0000, 'star') }));
+        const proximaFlare = new THREE.Mesh(new THREE.SphereGeometry(14, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.BackSide, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })); proxima.add(proximaFlare); proximaGroup.add(proxima);
+        const proximaB = new THREE.Mesh(new THREE.SphereGeometry(3.0, 32, 32), new THREE.MeshStandardMaterial({ map: createPlanetTexture(0xaa8866, 'rock'), color: 0xffcccc, emissive: 0xffcccc, emissiveIntensity: 0.1 }));
+        const pbOrbit = new THREE.Group(); pbOrbit.add(proximaB); proximaB.position.set(20, 0, 0); proximaGroup.add(pbOrbit);
+        addHZ(20, 3, proxima);
+
+        const gliese = new THREE.Mesh(new THREE.IcosahedronGeometry(22, 10), new THREE.MeshBasicMaterial({ color: 0xffaa55, map: createPlanetTexture(0xff8800, 'star') }));
+        gliese.position.copy(GLIESE_OFFSET); const glieseFlare = new THREE.Mesh(new THREE.SphereGeometry(26, 32, 32), new THREE.MeshBasicMaterial({ color: 0xff6600, side: THREE.BackSide, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })); gliese.add(glieseFlare); scene.add(gliese);
+
+        const siriusGroup = new THREE.Group(); siriusGroup.position.copy(SIRIUS_OFFSET); scene.add(siriusGroup);
+        const siriusA = new THREE.Mesh(new THREE.IcosahedronGeometry(45, 10), new THREE.MeshBasicMaterial({ color: 0xaaccff, map: createPlanetTexture(0x88aaff, 'star') }));
+        const siriusAFlare = new THREE.Mesh(new THREE.SphereGeometry(55, 32, 32), new THREE.MeshBasicMaterial({ color: 0x88aaff, side: THREE.BackSide, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending })); siriusA.add(siriusAFlare); siriusGroup.add(siriusA);
+        const siriusB = new THREE.Mesh(new THREE.SphereGeometry(5, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        const siriusBFlare = new THREE.Mesh(new THREE.SphereGeometry(8, 32, 32), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })); siriusB.add(siriusBFlare);
+        const sbOrbit = new THREE.Group(); sbOrbit.add(siriusB); siriusB.position.set(300, 0, 0); siriusGroup.add(sbOrbit);
+        addHZ(150, 20, siriusA);
+
+        const bhGroup = new THREE.Group(); bhGroup.position.copy(BLACKHOLE_OFFSET); bhGroup.rotation.x = 0.5; scene.add(bhGroup);
+        const bhCore = new THREE.Mesh(new THREE.SphereGeometry(30, 32, 32), new THREE.MeshBasicMaterial({ color: 0x000000 })); bhGroup.add(bhCore);
+        const disk = new THREE.Mesh(new THREE.RingGeometry(40, 120, 64), new THREE.MeshBasicMaterial({ color: 0xaa00ff, side: THREE.DoubleSide, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending })); disk.rotation.x = Math.PI/2; bhGroup.add(disk);
+        const innerDisk = new THREE.Mesh(new THREE.RingGeometry(32, 45, 64), new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending })); innerDisk.rotation.x = Math.PI/2; bhGroup.add(innerDisk);
+
+        const pulsarGroup = new THREE.Group(); pulsarGroup.position.copy(PULSAR_OFFSET); scene.add(pulsarGroup);
+        const pulsarCore = new THREE.Mesh(new THREE.SphereGeometry(8, 32, 32), new THREE.MeshBasicMaterial({ color: 0x88ffff, map: createPlanetTexture(0x00ffff, 'pulsar') })); pulsarGroup.add(pulsarCore);
+        const beamGeo = new THREE.ConeGeometry(4, 400, 32, 1, true); beamGeo.translate(0, 200, 0);
+        const beamMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+        const beam1 = new THREE.Mesh(beamGeo, beamMat); pulsarCore.add(beam1);
+
+        trackableObjects.push({ name: "Alpha Centauri A", mesh: alphaA, group: centauriGroup, type: 'star', system: 'centauri', center: ALPHA_OFFSET });
+        trackableObjects.push({ name: "Alpha Centauri B", mesh: alphaB, group: bOrbit, type: 'star', system: 'centauri', center: ALPHA_OFFSET });
+        trackableObjects.push({ name: "Proxima Centauri", mesh: proxima, group: proximaGroup, type: 'star', system: 'proxima', center: PROXIMA_OFFSET });
+        trackableObjects.push({ name: "Gliese 710", mesh: gliese, type: 'star', system: 'gliese', center: GLIESE_OFFSET });
+        trackableObjects.push({ name: "Sirius A", mesh: siriusA, type: 'star', system: 'sirius', center: SIRIUS_OFFSET });
+        trackableObjects.push({ name: "Sirius B", mesh: siriusB, type: 'star', system: 'sirius', center: SIRIUS_OFFSET });
+        trackableObjects.push({ name: "Black Hole", mesh: bhCore, type: 'star', system: 'blackhole', center: BLACKHOLE_OFFSET });
+        trackableObjects.push({ name: "Pulsar", mesh: pulsarCore, type: 'star', system: 'pulsar', center: PULSAR_OFFSET });
+
+        const targetListEl = document.getElementById('target-list');
+        const monitorEl = document.getElementById('data-monitor');
+        const elName = document.getElementById('monitor-name'); const elClass = document.getElementById('monitor-class'); const elSize = document.getElementById('monitor-size'); const elTemp = document.getElementById('monitor-temp'); const elDist = document.getElementById('monitor-dist'); const elDesc = document.getElementById('data-desc');
+        
+        let timeScale = 1.0;
+        document.getElementById('time-slider').addEventListener('input', (e) => { timeScale = parseFloat(e.target.value); document.getElementById('speed-display').innerText = timeScale.toFixed(1) + "x"; });
+        
+        let hzVisible = false;
+        const hzToggleBtn = document.getElementById('hz-toggle');
+        hzToggleBtn.onclick = () => { hzVisible = !hzVisible; hzToggleBtn.innerText = "HABITABLE ZONE: " + (hzVisible ? "ON" : "OFF"); hzToggleBtn.className = "toggle-btn " + (hzVisible ? "" : "off"); hzMaterial.opacity = hzVisible ? 0.3 : 0.0; };
+
+        const camToggleBtn = document.getElementById('cam-toggle');
+        camToggleBtn.onclick = () => { isAutoCam = !isAutoCam; camToggleBtn.innerText = "AUTO-CAM: " + (isAutoCam ? "ON" : "OFF"); camToggleBtn.className = "toggle-btn " + (isAutoCam ? "" : "off"); };
+
+        function updateMonitor(obj) {
+            monitorEl.style.display = 'block';
+            const info = infoDatabase[obj.name] || { class: "Unknown", size: "Unknown", temp: "Unknown", desc: "No data available." };
+            elName.innerText = obj.name.toUpperCase();
+            elClass.innerText = info.class; elSize.innerText = info.size; elTemp.innerText = info.temp;
+            let distDisplay = "";
+            if (obj.system === 'centauri') distDisplay = "4.37 ly"; else if (obj.system === 'proxima') distDisplay = "4.24 ly"; else if (obj.system === 'trappist') distDisplay = "40 ly"; else if (obj.system === 'nebula') distDisplay = "1,300+ ly"; else if (obj.system === 'orion') distDisplay = "~640 ly"; else distDisplay = Math.round(obj.dist * 1000000).toLocaleString() + " km (Sim)";
+            elDist.innerText = distDisplay;
+            elDesc.innerText = info.desc;
+        }
+
+        function createNavGroup(title, items, styleClass = '') {
+            const groupDiv = document.createElement('div'); groupDiv.className = 'nav-group';
+            const titleDiv = document.createElement('div'); titleDiv.className = 'nav-group-title'; titleDiv.innerText = title; groupDiv.appendChild(titleDiv);
+            items.forEach(obj => { const btn = document.createElement('button'); btn.className = 'target-btn ' + styleClass; btn.innerText = obj.name; btn.onclick = () => setTarget(obj, btn); groupDiv.appendChild(btn); });
+            targetListEl.appendChild(groupDiv);
+        }
+
+        createNavGroup("Inner System", trackableObjects.filter(p => p.type === 'planet' && p.dist < 150 && !p.system));
+        createNavGroup("Gas Giants", trackableObjects.filter(p => p.type === 'planet' && p.dist >= 150 && p.dist < 450));
+        createNavGroup("Outer Rim", trackableObjects.filter(p => p.type === 'planet' && p.dist >= 450));
+        createNavGroup("Comets", trackableObjects.filter(p => p.type === 'comet'), 'comet-btn');
+        createNavGroup("Nearby Stars", trackableObjects.filter(p => p.system === 'centauri' || p.system === 'proxima' || p.system === 'sirius' || p.system === 'gliese'), 'warp-active');
+        createNavGroup("TRAPPIST-1 System", trackableObjects.filter(p => p.system === 'trappist'), 'trappist-btn');
+        createNavGroup("Orion Constellation", trackableObjects.filter(p => p.system === 'orion'), 'orion-btn');
+        createNavGroup("Deep Space", trackableObjects.filter(p => p.system === 'nebula' || p.system === 'blackhole' || p.system === 'pulsar'), 'nebula-btn');
+
+        document.getElementById('reset-btn').onclick = () => { currentTarget = null; flyTo(initialCamPos, new THREE.Vector3(0,0,0)); document.querySelectorAll('.target-btn').forEach(b => b.classList.remove('active')); monitorEl.style.display = 'none'; };
+
+        function setTarget(obj, btnElement) {
+            document.querySelectorAll('.target-btn').forEach(b => b.classList.remove('active')); if(btnElement) btnElement.classList.add('active');
+            currentTarget = obj; updateMonitor(obj);
+            let targetPos = new THREE.Vector3();
+            if (obj.center) targetPos.copy(obj.center); else if (obj.type === 'planet' || obj.type === 'comet') obj.mesh.getWorldPosition(targetPos); else obj.container.getWorldPosition(targetPos);
+            
+            // ZOOM LOGIC
+            let offsetScalar = 40; 
+            if(obj.type === 'star') offsetScalar = 100;
+            if(obj.system === 'trappist') offsetScalar = 80; 
+            if(obj.system === 'orion') offsetScalar = 4000; // Giant stars need MORE distance to see shape
+
+            const camOffset = new THREE.Vector3(offsetScalar, offsetScalar/2, offsetScalar);
+            flyDuration = camera.position.distanceTo(targetPos) > 50000 ? 4.0 : 1.5;
+            flyTo(targetPos.clone().add(camOffset), targetPos);
+        }
+
+        function flyTo(newCamPos, newTargetPos) { isFlying = true; flyStartTime = clock.getElapsedTime(); flyStartPos.copy(camera.position); flyEndPos.copy(newCamPos); flyStartTarget.copy(controls.target); flyEndTarget.copy(newTargetPos); }
+
+        const clock = new THREE.Clock();
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+            const speed = timeScale; 
+
+            milkyWay.rotation.y += 0.0001 * speed;
+            centauriGroup.children.forEach(child => { if(child.children.length > 0) child.rotation.y += 0.002 * speed; }); 
+            proximaGroup.children.forEach(c => { if(c.children.length>0) c.rotation.y += 0.02 * speed; }); 
+            bhGroup.children.forEach(c => { if(c.geometry.type === 'RingGeometry') c.rotation.z -= 0.02 * speed; });
+            pulsarGroup.children[0].rotation.z -= 0.2 * speed; pulsarGroup.children[0].rotation.x = Math.sin(time*2)*0.2;
+            
+            // TRAPPIST Animation
+            trappist.children.forEach(c => { if(c.type === 'Group') c.rotation.y += (0.05 / (c.children[0].position.x/10)) * speed; });
+            
+            // Betelgeuse Pulsation
+            const pulse = 1 + Math.sin(time) * 0.05;
+            if(betelData.mesh) betelData.mesh.scale.set(1+pulse*0.1, 1+pulse*0.1, 1+pulse*0.1);
+
+            trackableObjects.forEach(obj => {
+                if(obj.type === 'planet' && !obj.system) {
+                    obj.angle += obj.speed * 0.5 * speed; obj.mesh.position.x = Math.cos(obj.angle) * obj.dist; obj.mesh.position.z = Math.sin(obj.angle) * obj.dist; obj.mesh.rotation.y += 0.01 * speed;
+                    if(obj.moons) { obj.moons.forEach(m => { m.angle += m.speed * 0.5 * speed; m.mesh.position.x = obj.mesh.position.x + Math.cos(m.angle) * m.dist; m.mesh.position.z = obj.mesh.position.z + Math.sin(m.angle) * m.dist; }); }
+                } else if (obj.type === 'comet') {
+                    obj.angle += obj.speed * 0.1 * speed;
+                    const x = obj.cx - obj.a * Math.cos(obj.angle); const z = obj.b * Math.sin(obj.angle);
+                    obj.mesh.position.set(x, 0, z); obj.mesh.lookAt(0,0,0); obj.mesh.rotateY(Math.PI);
+                }
+            });
+
+            if (isFlying) {
+                const now = clock.getElapsedTime(); const progress = Math.min((now - flyStartTime) / flyDuration, 1.0); const ease = 1 - Math.pow(1 - progress, 3);
+                camera.position.lerpVectors(flyStartPos, flyEndPos, ease); controls.target.lerpVectors(flyStartTarget, flyEndTarget, ease);
+                if (progress >= 1.0) isFlying = false;
+            } else if (currentTarget) {
+                let targetWorldPos = new THREE.Vector3();
+                if(currentTarget.center) targetWorldPos.copy(currentTarget.center); else if (currentTarget.type === 'planet' || currentTarget.type === 'comet') currentTarget.mesh.getWorldPosition(targetWorldPos); else currentTarget.container.getWorldPosition(targetWorldPos);
+                
+                if (isAutoCam) {
+                    const radius = 50; const angle = time * 0.2;
+                    camera.position.x = targetWorldPos.x + Math.sin(angle) * radius;
+                    camera.position.z = targetWorldPos.z + Math.cos(angle) * radius;
+                    camera.position.y = targetWorldPos.y + 20;
+                    controls.target.copy(targetWorldPos);
+                } else {
+                    controls.target.lerp(targetWorldPos, 0.1);
+                }
+            }
+            controls.update(); composer.render();
+        }
+        animate();
+        window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight); });
+    </script>
+</body>
+</html>
