@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real Galaxy Mode (Final: Atmospheric Haze)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: monospace; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #video-element { display: none; }
+        
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 10; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #88ccff;
+            transition: opacity 0.5s; pointer-events: none;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 2px solid #88ccff; border-top: 2px solid transparent;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>Generating Atmosphere...</div>
+    </div>
+
+    <video id="video-element"></video>
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        const CONFIG = {
+            particleCount: 200000, // 密度を出すために大量に
+            particleSize: 1.2,     // 一つ一つは小さく繊細に
+            bloomStrength: 0.6,    // 光りすぎないように抑える（重要）
+            bloomRadius: 0.4,
+            rotationSpeed: 0.002
+        };
+
+        const STATE = {
+            handDistance: 0, 
+            targetHandDistance: 0,
+        };
+
+        // --- Vertex Shader ---
+        const vertexShader = `
+            uniform float uTime;
+            uniform float uSize;
+            uniform float uExpansion;
+            
+            attribute float aScale;
+            attribute vec3 aColor; 
+            attribute vec3 aRandomness;
+            
+            varying vec3 vColor;
+
+            void main() {
+                vec3 pos = position;
+
+                // 拡張ロジック
+                vec3 dir = normalize(pos);
+                float dist = length(pos);
+                float factor = smoothstep(1.0, 15.0, dist); 
+                pos += dir * uExpansion * 8.0 * factor;
+
+                // 揺らぎ
+                pos += aRandomness * (sin(uTime * 0.5) * 0.02);
+
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                gl_Position = projectionMatrix * mvPosition;
+
+                // 遠近感調整
+                gl_PointSize = uSize * aScale * (350.0 / -mvPosition.z);
+                
+                vColor = aColor;
+            }
+        `;
+
+        // --- Fragment Shader ---
+        const fragmentShader = `
+            varying vec3 vColor;
+
+            void main() {
+                vec2 center = gl_PointCoord - 0.5;
+                float dist = length(center);
+                
+                // ソフトな丸い光
+                float alpha = 1.0 - smoothstep(0.0, 0.5, dist);
+                alpha = pow(alpha, 2.0);
+
+                if (alpha < 0.01) discard;
+
+                gl_FragColor = vec4(vColor, alpha);
+            }
+        `;
+
+        class ParticleSystem {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+
+                this.initThree();
+                this.initGalaxy(); 
+                this.initPostProcessing();
+                this.initMediaPipe();
+                this.initGUI();
+                
+                this.clock = new THREE.Clock();
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+
+                window.addEventListener('resize', this.onResize.bind(this));
+                setTimeout(() => document.getElementById('loader').style.display = 'none', 1000);
+            }
+
+            initThree() {
+                this.scene = new THREE.Scene();
+                // 背景：完全な黒ではなく、宇宙空間の深い青
+                this.scene.background = new THREE.Color(0x010103); 
+                
+                this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 0.1, 3000);
+                this.camera.position.set(0, 18, 10); // 上から見下ろすアングル
+                this.camera.lookAt(0, 0, 0);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+                this.renderer.setSize(this.width, this.height);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.container.appendChild(this.renderer.domElement);
+            }
+
+            initGalaxy() {
+                const count = CONFIG.particleCount;
+                const positions = new Float32Array(count * 3);
+                const colors = new Float32Array(count * 3);
+                const scales = new Float32Array(count);
+                const randomness = new Float32Array(count * 3);
+
+                // ★カラーパレット（リファレンス画像準拠）★
+                const colorCore = new THREE.Color(0xffddaa); // クリームイエロー
+                const colorArm = new THREE.Color(0xaaccff);  // 水色～青
+                const colorNebula = new THREE.Color(0xff66aa); // ピンク
+                const colorHaze = new THREE.Color(0x334466); // 隙間を埋める薄い青グレー
+
+                for (let i = 0; i < count; i++) {
+                    const i3 = i * 3;
+                    let x, y, z;
+                    let color = new THREE.Color();
+                    let scale = 1.0;
+
+                    const r = Math.random();
+
+                    // --- 1. バルジ（中心核）: 10% ---
+                    if (r < 0.10) {
+                        const dist = Math.random() * 2.5;
+                        const angle = Math.random() * Math.PI * 2;
+                        // 棒構造を作る
+                        x = dist * Math.cos(angle) * 2.0; 
+                        z = dist * Math.sin(angle) * 0.8;
+                        y = (Math.random() - 0.5) * (2.0 - dist * 0.5);
+
+                        color.copy(colorCore);
+                        // 中心だけ白く、周りはクリーム色
+                        if (dist < 0.8) color.lerp(new THREE.Color(0xffffff), 0.6);
+                        
+                        scale = Math.random() * 2.0 + 1.5;
+                    }
+                    // --- 2. ベース円盤（Haze / 隙間埋め）: 40% ★最重要★ ---
+                    else if (r < 0.50) {
+                        // 渦巻き構造を無視して、円盤全体に均等に散らす
+                        // これにより「黒い隙間」がなくなります
+                        const dist = Math.random() * 12.0 + 2.0;
+                        const angle = Math.random() * Math.PI * 2;
+                        
+                        x = Math.cos(angle) * dist;
+                        z = Math.sin(angle) * dist;
+                        y = (Math.random() - 0.5) * 0.6; // 薄く広げる
+
+                        color.copy(colorHaze);
+                        // ランダムに少し暗くする
+                        color.lerp(new THREE.Color(0x000000), Math.random() * 0.5);
+                        
+                        scale = Math.random() * 0.8 + 0.2; 
+                    }
+                    // --- 3. 渦巻き腕 (Spiral Arms) : 50% ---
+                    else {
+                        const armIndex = i % 2; 
+                        const armOffset = Math.PI * armIndex;
+                        // 開始位置を少し外側に
+                        const dist = Math.random() * 10.0 + 3.0;
+                        const spiralAngle = dist * 0.5; // 巻き具合
+                        let angle = armOffset + spiralAngle;
+                        
+                        // 散らばり
+                        const spread = (Math.random() - 0.5) * 1.2; 
+                        angle += spread * (0.5 + dist * 0.05);
+
+                        x = Math.cos(angle) * dist;
+                        z = Math.sin(angle) * dist;
+                        y = (Math.random() - 0.5) * 0.4;
+
+                        // 棒との接続
+                        if (dist < 5.0) { x *= 1.3; z *= 0.7; }
+
+                        // ★ピンクの星雲アクセント★
+                        // ランダムではなく、ある程度まとまって存在するようにノイズ的に配置
+                        // ここでは簡易的に確率で配置
+                        if (Math.random() < 0.15) { 
+                            color.copy(colorNebula);
+                            scale = Math.random() * 2.5 + 1.5; 
+                            // 少し位置をずらす（ガスは星より広がるため）
+                            x += (Math.random()-0.5)*0.3;
+                            z += (Math.random()-0.5)*0.3;
+                        } else {
+                            color.copy(colorArm);
+                            // 外側ほど青く深く
+                            color.lerp(new THREE.Color(0x113366), (dist - 3.0) / 10.0);
+                            scale = Math.random() * 1.2 + 0.6;
+                        }
+                    }
+
+                    positions[i3] = x;
+                    positions[i3+1] = y;
+                    positions[i3+2] = z;
+
+                    colors[i3] = color.r;
+                    colors[i3+1] = color.g;
+                    colors[i3+2] = color.b;
+
+                    scales[i] = scale;
+                    
+                    randomness[i3] = Math.random()-0.5;
+                    randomness[i3+1] = Math.random()-0.5;
+                    randomness[i3+2] = Math.random()-0.5;
+                }
+
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+                geometry.setAttribute('aScale', new THREE.BufferAttribute(scales, 1));
+                geometry.setAttribute('aRandomness', new THREE.BufferAttribute(randomness, 3));
+
+                this.material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uSize: { value: CONFIG.particleSize },
+                        uExpansion: { value: 0 }
+                    },
+                    vertexShader: vertexShader,
+                    fragmentShader: fragmentShader,
+                    transparent: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+
+                this.points = new THREE.Points(geometry, this.material);
+                this.points.rotation.x = -0.6; // リファレンス画像と同じくらい傾ける
+                this.points.rotation.z = -0.2; 
+                this.scene.add(this.points);
+            }
+
+            initPostProcessing() {
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(new RenderPass(this.scene, this.camera));
+                
+                this.bloomPass = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 1.5, 0.4, 0.85);
+                this.bloomPass.strength = CONFIG.bloomStrength;
+                this.bloomPass.radius = CONFIG.bloomRadius;
+                this.composer.addPass(this.bloomPass);
+            }
+
+            initMediaPipe() {
+                const video = document.getElementById('video-element');
+                const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                hands.onResults(this.onHandsResults.bind(this));
+                const camera = new Camera(video, {
+                    onFrame: async () => await hands.send({image: video}),
+                    width: 640, height: 480
+                });
+                camera.start().catch(e => console.log(e));
+            }
+
+            onHandsResults(results) {
+                let newTargetDistance = 0;
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const lms = results.multiHandLandmarks;
+                    if (lms.length === 2) {
+                        const dist = Math.sqrt(Math.pow(lms[0][9].x - lms[1][9].x, 2) + Math.pow(lms[0][9].y - lms[1][9].y, 2));
+                        newTargetDistance = THREE.MathUtils.clamp((dist - 0.1) * 2.5, 0, 2.0);
+                    }
+                }
+                STATE.targetHandDistance = newTargetDistance;
+            }
+
+            initGUI() {
+                const gui = new GUI({ title: 'Real Galaxy Settings' });
+                gui.domElement.style.marginTop = "60px";
+                const visual = gui.addFolder('Visuals');
+                visual.add(CONFIG, 'bloomStrength', 0, 3).name('Glow').onChange(v => this.bloomPass.strength = v);
+                visual.add(CONFIG, 'particleSize', 0.1, 5).name('Star Size').onChange(v => this.material.uniforms.uSize.value = v);
+                visual.add(CONFIG, 'rotationSpeed', 0, 0.05).name('Speed');
+            }
+
+            onResize() {
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+                this.camera.aspect = this.width / this.height;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(this.width, this.height);
+                this.composer.setSize(this.width, this.height);
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate);
+                const time = this.clock.getElapsedTime();
+
+                STATE.handDistance += (STATE.targetHandDistance - STATE.handDistance) * 0.05;
+
+                this.material.uniforms.uTime.value = time;
+                this.material.uniforms.uExpansion.value = STATE.handDistance;
+
+                // 時計回りにゆっくり回転
+                this.points.rotation.y -= CONFIG.rotationSpeed; 
+                
+                this.composer.render();
+            }
+        }
+        new ParticleSystem();
+    </script>
+</body>
+</html>

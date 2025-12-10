@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>God Mode Particle System (Fixed)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: monospace; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #video-element { display: none; }
+        
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 10; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #ff0055;
+            transition: opacity 0.5s; pointer-events: none;
+        }
+        .spinner {
+            width: 40px; height: 40px; border: 2px solid #ff0055; border-top: 2px solid transparent;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>Initializing Fixed God Mode...</div>
+    </div>
+
+    <video id="video-element"></video>
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        const CONFIG = {
+            particleCount: 60000, 
+            particleSize: 1.2,    
+            bloomStrength: 2.5,
+            bloomRadius: 0.8,
+            trail: 0.88,          
+            shape: 'Galaxy'
+        };
+
+        const STATE = {
+            handDistance: 0, 
+            handVelocity: 0, 
+            gravity: 0,        
+            hueShift: 0,       
+            targetHandDistance: 0,
+            targetHandVelocity: 0,
+            targetGravity: 0,
+            targetHue: 0.5     
+        };
+
+        // --- Shaders ---
+        const vertexShader = `
+            uniform float uTime;
+            uniform float uExpansion;
+            uniform float uTurbulence;
+            uniform float uGravity;   
+            uniform float uSize;
+
+            attribute vec3 positionTarget;
+            varying float vDistance;
+
+            vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+            vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
+            vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+            float snoise(vec3 v) {
+                const vec2 C = vec2(1.0/6.0, 1.0/3.0);
+                const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
+                vec3 i  = floor(v + dot(v, C.yyy));
+                vec3 x0 = v - i + dot(i, C.xxx);
+                vec3 g = step(x0.yzx, x0.xyz);
+                vec3 l = 1.0 - g;
+                vec3 i1 = min( g.xyz, l.zxy );
+                vec3 i2 = max( g.xyz, l.zxy );
+                vec3 x1 = x0 - i1 + C.xxx;
+                vec3 x2 = x0 - i2 + C.yyy;
+                vec3 x3 = x0 - D.yyy;
+                i = mod289(i);
+                vec4 p = permute( permute( permute( i.z + vec4(0.0, i1.z, i2.z, 1.0 )) + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
+                float n_ = 0.142857142857;
+                vec3  ns = n_ * D.wyz - D.xzx;
+                vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
+                vec4 x_ = floor(j * ns.z);
+                vec4 y_ = floor(j - 7.0 * x_ );
+                vec4 x = x_ *ns.x + ns.yyyy;
+                vec4 y = y_ *ns.x + ns.yyyy;
+                vec4 h = 1.0 - abs(x) - abs(y);
+                vec4 b0 = vec4( x.xy, y.xy );
+                vec4 b1 = vec4( x.zw, y.zw );
+                vec4 s0 = floor(b0)*2.0 + 1.0;
+                vec4 s1 = floor(b1)*2.0 + 1.0;
+                vec4 sh = -step(h, vec4(0.0));
+                vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy ;
+                vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww ;
+                vec3 p0 = vec3(a0.xy,h.x);
+                vec3 p1 = vec3(a0.zw,h.y);
+                vec3 p2 = vec3(a1.xy,h.z);
+                vec3 p3 = vec3(a1.zw,h.w);
+                vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+                p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
+                vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
+                m = m * m;
+                return 42.0 * dot( m*m, vec4( dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3) ) );
+            }
+
+            void main() {
+                vec3 mixedPos = mix(position, positionTarget, 1.0);
+                
+                // 1. Organic Noise Flow
+                float noiseVal = snoise(mixedPos * 0.5 + uTime * 0.2);
+                vec3 flow = vec3(
+                    snoise(mixedPos * 0.8 + uTime * 0.1),
+                    snoise(mixedPos * 0.8 + uTime * 0.1 + 100.0),
+                    snoise(mixedPos * 0.8 + uTime * 0.1 + 200.0)
+                ) * 0.15;
+
+                // 2. Interaction: Expansion
+                vec3 dir = normalize(mixedPos);
+                vec3 expandedPos = mixedPos + dir * (uExpansion * 5.0) + flow;
+
+                // 3. Interaction: Turbulence
+                expandedPos += normal * noiseVal * uTurbulence * 2.0;
+
+                // 4. Interaction: Gravity/Black Hole
+                if (uGravity > 0.01) {
+                    float dist = length(expandedPos);
+                    float pull = uGravity * 0.8; 
+                    float angle = dist * 2.0 - uTime * 5.0;
+                    float s = sin(angle);
+                    float c = cos(angle);
+                    mat2 rot = mat2(c, -s, s, c);
+                    expandedPos.xz = rot * expandedPos.xz;
+                    expandedPos = mix(expandedPos, vec3(0.0), pull * (1.0 - smoothstep(0.0, 5.0, dist))); 
+                }
+
+                vec4 mvPosition = modelViewMatrix * vec4(expandedPos, 1.0);
+                gl_Position = projectionMatrix * mvPosition;
+
+                gl_PointSize = uSize * (300.0 / -mvPosition.z);
+                
+                vDistance = length(mixedPos);
+            }
+        `;
+
+        const fragmentShader = `
+            uniform float uHueShift;
+            varying float vDistance;
+
+            vec3 hsl2rgb(vec3 c) {
+                vec3 rgb = clamp(abs(mod(c.x * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+                return c.z + c.y * (rgb - 0.5) * (1.0 - abs(2.0 * c.z - 1.0));
+            }
+
+            void main() {
+                vec2 center = gl_PointCoord - 0.5;
+                float dist = length(center);
+                float alpha = exp(-dist * dist * 10.0); 
+
+                if (alpha < 0.01) discard;
+
+                float hue = uHueShift + vDistance * 0.05;
+                vec3 color = hsl2rgb(vec3(hue, 0.9, 0.6));
+
+                gl_FragColor = vec4(color, alpha);
+            }
+        `;
+
+        class ParticleSystem {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+
+                this.initThree();
+                this.initParticles();
+                this.initPostProcessing();
+                this.initMediaPipe();
+                this.initGUI();
+                
+                this.clock = new THREE.Clock();
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+
+                window.addEventListener('resize', this.onResize.bind(this));
+                setTimeout(() => document.getElementById('loader').style.display = 'none', 1000);
+            }
+
+            initThree() {
+                this.scene = new THREE.Scene();
+                this.scene.fog = new THREE.FogExp2(0x000000, 0.03);
+
+                this.camera = new THREE.PerspectiveCamera(70, this.width / this.height, 0.1, 1000);
+                this.camera.position.set(0, 2, 12);
+                this.camera.lookAt(0, 0, 0);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+                this.renderer.setSize(this.width, this.height);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.container.appendChild(this.renderer.domElement);
+            }
+
+            getShapePositions(type) {
+                const positions = new Float32Array(CONFIG.particleCount * 3);
+                const count = CONFIG.particleCount;
+
+                for (let i = 0; i < count; i++) {
+                    let x, y, z;
+                    const ratio = i / count;
+
+                    if (type === 'Galaxy') {
+                        const arm = i % 3;
+                        const r = Math.pow(Math.random(), 2.0) * 8.0; 
+                        const angle = r * 1.5 + (arm * (Math.PI * 2 / 3)) + Math.random() * 0.5;
+                        x = Math.cos(angle) * r;
+                        y = (Math.random() - 0.5) * (r * 0.3); 
+                        z = Math.sin(angle) * r;
+                    } 
+                    else if (type === 'Sphere') {
+                        const phi = Math.acos(1 - 2 * ratio);
+                        const theta = Math.PI * (1 + 5**0.5) * i;
+                        const r = 3.5;
+                        x = r * Math.sin(phi) * Math.cos(theta);
+                        y = r * Math.sin(phi) * Math.sin(theta);
+                        z = r * Math.cos(phi);
+                    }
+                    
+                    x += (Math.random()-0.5) * 0.2;
+                    y += (Math.random()-0.5) * 0.2;
+                    z += (Math.random()-0.5) * 0.2;
+
+                    positions[i * 3] = x;
+                    positions[i * 3 + 1] = y;
+                    positions[i * 3 + 2] = z;
+                }
+                return positions;
+            }
+
+            initParticles() {
+                this.geometry = new THREE.BufferGeometry();
+                const pos = this.getShapePositions(CONFIG.shape);
+                this.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                this.geometry.setAttribute('positionTarget', new THREE.BufferAttribute(pos, 3)); 
+
+                this.material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uHueShift: { value: 0.5 },
+                        uExpansion: { value: 0 },
+                        uTurbulence: { value: 0 },
+                        uGravity: { value: 0 },
+                        uMixFactor: { value: 0 },
+                        uSize: { value: CONFIG.particleSize }
+                    },
+                    vertexShader: vertexShader,
+                    fragmentShader: fragmentShader,
+                    transparent: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+
+                this.points = new THREE.Points(this.geometry, this.material);
+                this.scene.add(this.points);
+            }
+
+            initPostProcessing() {
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(new RenderPass(this.scene, this.camera));
+                this.bloomPass = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 1.5, 0.4, 0.85);
+                this.bloomPass.strength = CONFIG.bloomStrength;
+                this.bloomPass.radius = CONFIG.bloomRadius;
+                this.composer.addPass(this.bloomPass);
+                this.afterimagePass = new AfterimagePass();
+                this.afterimagePass.uniforms["damp"].value = CONFIG.trail;
+                this.composer.addPass(this.afterimagePass);
+            }
+
+            initMediaPipe() {
+                const video = document.getElementById('video-element');
+                const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                hands.onResults(this.onHandsResults.bind(this));
+                const camera = new Camera(video, {
+                    onFrame: async () => await hands.send({image: video}),
+                    width: 640, height: 480
+                });
+                camera.start().catch(e => console.log(e));
+            }
+
+            // --- FIXED LOGIC ---
+            onHandsResults(results) {
+                // Default values
+                let newTargetDistance = 0;
+                let newTargetGravity = 0;
+                let newTargetVelocity = 0;
+                let newTargetHue = 0.5;
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const lms = results.multiHandLandmarks;
+
+                    // 1. Expansion Logic (Primary)
+                    // Always calculate distance if 2 hands are present
+                    if (lms.length === 2) {
+                        const dist = Math.sqrt(Math.pow(lms[0][9].x - lms[1][9].x, 2) + Math.pow(lms[0][9].y - lms[1][9].y, 2));
+                        newTargetDistance = THREE.MathUtils.clamp((dist - 0.1) * 2.5, 0, 2.0);
+                    }
+
+                    // 2. Black Hole Logic (Secondary)
+                    // Check if any hand is a FIST
+                    let isFist = false;
+                    for (const hand of lms) {
+                        const wrist = hand[0];
+                        const middleTip = hand[12];
+                        const distToPalm = Math.sqrt(Math.pow(wrist.x - middleTip.x, 2) + Math.pow(wrist.y - middleTip.y, 2));
+                        // Stricter threshold (was 0.2, now 0.15)
+                        if (distToPalm < 0.15) { 
+                            isFist = true; 
+                        }
+                    }
+
+                    if (isFist) {
+                        // Safety: Only activate Black Hole if we are NOT expanding significantly
+                        // This fixes the issue where opening hands was blocked
+                        if (newTargetDistance < 0.3) {
+                            newTargetGravity = 1.0;
+                        }
+                    }
+
+                    // 3. Color Logic (Height)
+                    const wrist = lms[0][0];
+                    newTargetHue = 1.0 - wrist.y;
+
+                    // 4. Velocity
+                    if (this.prevWrist) {
+                        const speed = Math.sqrt(Math.pow(wrist.x - this.prevWrist.x, 2) + Math.pow(wrist.y - this.prevWrist.y, 2));
+                        newTargetVelocity = THREE.MathUtils.clamp(speed * 40.0, 0, 3.0);
+                    }
+                    this.prevWrist = wrist;
+                }
+
+                STATE.targetHandDistance = newTargetDistance;
+                STATE.targetGravity = newTargetGravity;
+                STATE.targetHue = newTargetHue;
+                STATE.targetHandVelocity = newTargetVelocity;
+            }
+
+            initGUI() {
+                const gui = new GUI({ title: 'God Mode Settings' });
+                gui.domElement.style.marginTop = "60px";
+                
+                const visual = gui.addFolder('Visuals');
+                visual.add(CONFIG, 'bloomStrength', 0, 5).name('Glow').onChange(v => this.bloomPass.strength = v);
+                visual.add(CONFIG, 'trail', 0, 0.99).name('Trail').onChange(v => this.afterimagePass.uniforms["damp"].value = v);
+                visual.add(CONFIG, 'particleSize', 0.1, 5).onChange(v => this.material.uniforms.uSize.value = v);
+            }
+
+            onResize() {
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+                this.camera.aspect = this.width / this.height;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(this.width, this.height);
+                this.composer.setSize(this.width, this.height);
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate);
+                const time = this.clock.getElapsedTime();
+
+                STATE.handDistance += (STATE.targetHandDistance - STATE.handDistance) * 0.05;
+                STATE.handVelocity += (STATE.targetHandVelocity - STATE.handVelocity) * 0.05;
+                STATE.gravity += (STATE.targetGravity - STATE.gravity) * 0.05;
+                STATE.hueShift += (STATE.targetHue - STATE.hueShift) * 0.05;
+
+                this.material.uniforms.uTime.value = time;
+                this.material.uniforms.uExpansion.value = STATE.handDistance;
+                this.material.uniforms.uTurbulence.value = STATE.handVelocity;
+                this.material.uniforms.uGravity.value = STATE.gravity;
+                this.material.uniforms.uHueShift.value = STATE.hueShift;
+
+                const rotSpeed = 0.05 + STATE.gravity * 0.2;
+                this.points.rotation.y += rotSpeed * 0.016; 
+                
+                this.composer.render();
+            }
+        }
+        new ParticleSystem();
+    </script>
+</body>
+</html>
+

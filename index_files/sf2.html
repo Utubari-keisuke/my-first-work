@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cinematic Galaxy Mode (Rich & Colorful)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: monospace; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        #video-element { display: none; }
+        
+        #loader {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #000; z-index: 10; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; color: #ff00ff;
+            font-size: 1.2rem;
+            transition: opacity 0.8s ease-out; pointer-events: none;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 3px solid #00ffff; border-top: 3px solid transparent;
+            border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;
+            box-shadow: 0 0 15px #00ffff;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>Creating Cinematic Universe...</div>
+    </div>
+
+    <video id="video-element"></video>
+    <div id="canvas-container"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+        import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
+
+        const CONFIG = {
+            particleCount: 200000, 
+            bgStarCount: 10000,    // 背景の星も倍増
+            particleSize: 1.8,     
+            bloomStrength: 1.5,    // 輝きを強めてリッチに
+            bloomRadius: 0.6,
+            rotationSpeed: 0.002
+        };
+
+        const STATE = {
+            handDistance: 0, 
+            targetHandDistance: 0,
+        };
+
+        // --- 1. 背景の星雲（Nebula）用シェーダー ---
+        // 画面全体を包む「宇宙の霧」を描画します
+        const bgVertexShader = `
+            varying vec3 vWorldPosition;
+            void main() {
+                vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        const bgFragmentShader = `
+            uniform float uTime;
+            varying vec3 vWorldPosition;
+
+            // Simple Noise
+            float hash(float n) { return fract(sin(n) * 43758.5453123); }
+            float noise(vec3 x) {
+                vec3 p = floor(x);
+                vec3 f = fract(x);
+                f = f * f * (3.0 - 2.0 * f);
+                float n = p.x + p.y * 57.0 + 113.0 * p.z;
+                return mix(mix(mix(hash(n + 0.0), hash(n + 1.0), f.x),
+                               mix(hash(n + 57.0), hash(n + 58.0), f.x), f.y),
+                           mix(mix(hash(n + 113.0), hash(n + 114.0), f.x),
+                               mix(hash(n + 170.0), hash(n + 171.0), f.x), f.y), f.z);
+            }
+
+            void main() {
+                vec3 dir = normalize(vWorldPosition);
+                float n = noise(dir * 2.0 + uTime * 0.05);
+                n += 0.5 * noise(dir * 4.0 - uTime * 0.05);
+                n += 0.25 * noise(dir * 8.0 + uTime * 0.05);
+                
+                // 宇宙っぽい色（深い青〜紫〜黒）
+                vec3 color1 = vec3(0.02, 0.02, 0.05); // 深い闇
+                vec3 color2 = vec3(0.1, 0.0, 0.2);    // 紫
+                vec3 color3 = vec3(0.0, 0.1, 0.2);    // 青緑
+                
+                vec3 finalColor = mix(color1, color2, n);
+                finalColor = mix(finalColor, color3, n * n); // 複雑なグラデーション
+
+                gl_FragColor = vec4(finalColor, 1.0);
+            }
+        `;
+
+        // --- 2. 銀河の星用シェーダー ---
+        const starVertexShader = `
+            uniform float uTime;
+            uniform float uSize;
+            uniform float uExpansion;
+            
+            attribute float aScale;
+            attribute vec3 aColor; 
+            attribute vec3 aRandomness;
+            
+            varying vec3 vColor;
+            varying float vDistance;
+
+            void main() {
+                vec3 pos = position;
+
+                // 拡張
+                vec3 dir = normalize(pos);
+                float dist = length(pos);
+                float factor = smoothstep(2.0, 20.0, dist); 
+                pos += dir * uExpansion * 10.0 * factor;
+
+                // ゆらぎ（キラキラ感）
+                pos += aRandomness * (sin(uTime * 1.0) * 0.05);
+
+                vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
+                gl_Position = projectionMatrix * mvPosition;
+
+                gl_PointSize = uSize * aScale * (450.0 / -mvPosition.z);
+                
+                vColor = aColor;
+                vDistance = dist;
+            }
+        `;
+
+        const starFragmentShader = `
+            varying vec3 vColor;
+            varying float vDistance;
+
+            void main() {
+                vec2 center = gl_PointCoord - 0.5;
+                float distToCenter = length(center);
+                float alpha = 1.0 - smoothstep(0.0, 0.5, distToCenter);
+                alpha = pow(alpha, 2.5); // シャープな輝き
+
+                // 外側のフェードアウトを少し緩くして、広がりを見せる
+                float galaxyFade = 1.0 - smoothstep(15.0, 40.0, vDistance);
+
+                if (alpha < 0.01) discard;
+
+                gl_FragColor = vec4(vColor, alpha * galaxyFade);
+            }
+        `;
+
+        class ParticleSystem {
+            constructor() {
+                this.container = document.getElementById('canvas-container');
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+
+                this.initThree();
+                this.initBackgroundNebula(); // ★新規：背景の星雲
+                this.initGalaxy(); 
+                this.initBackgroundStars(); 
+                this.initPostProcessing();
+                this.initMediaPipe();
+                this.initGUI();
+                
+                this.clock = new THREE.Clock();
+                this.animate = this.animate.bind(this);
+                requestAnimationFrame(this.animate);
+
+                window.addEventListener('resize', this.onResize.bind(this));
+                setTimeout(() => document.getElementById('loader').style.display = 'none', 1000);
+            }
+
+            initThree() {
+                this.scene = new THREE.Scene();
+                // 背景色はシェーダーで描くので黒でOKだが、保険で深い色を
+                this.scene.background = new THREE.Color(0x000000); 
+                
+                this.camera = new THREE.PerspectiveCamera(60, this.width / this.height, 0.1, 5000);
+                // 迫力のあるアングル
+                this.camera.position.set(0, 12, 18); 
+                this.camera.lookAt(0, 0, 0);
+
+                this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+                this.renderer.setSize(this.width, this.height);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.container.appendChild(this.renderer.domElement);
+            }
+
+            // ★背景の星雲（これが画面を埋める！）★
+            initBackgroundNebula() {
+                const geometry = new THREE.SphereGeometry(1000, 32, 32);
+                this.bgMaterial = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 }
+                    },
+                    vertexShader: bgVertexShader,
+                    fragmentShader: bgFragmentShader,
+                    side: THREE.BackSide // 内側を描画
+                });
+                this.bgMesh = new THREE.Mesh(geometry, this.bgMaterial);
+                this.scene.add(this.bgMesh);
+            }
+
+            initGalaxy() {
+                const count = CONFIG.particleCount;
+                const positions = new Float32Array(count * 3);
+                const colors = new Float32Array(count * 3);
+                const scales = new Float32Array(count);
+                const randomness = new Float32Array(count * 3);
+
+                // ★リッチなカラーパレット★
+                const colorCore = new THREE.Color(0xffaa55); // 黄金のコア
+                const colorArm = new THREE.Color(0x00ffff);  // シアン（明るい青）
+                const colorPink = new THREE.Color(0xff00ff); // マゼンタ
+                const colorOuter = new THREE.Color(0x5500aa); // 紫
+
+                for (let i = 0; i < count; i++) {
+                    const i3 = i * 3;
+                    let x, y, z;
+                    let color = new THREE.Color();
+                    let scale = 1.0;
+
+                    const r = Math.random();
+
+                    // 1. 黄金のバルジ (10%)
+                    if (r < 0.10) {
+                        const dist = Math.random() * 3.0;
+                        const angle = Math.random() * Math.PI * 2;
+                        x = dist * Math.cos(angle) * 1.5; 
+                        z = dist * Math.sin(angle) * 0.8;
+                        y = (Math.random() - 0.5) * (3.0 - dist);
+
+                        color.copy(colorCore);
+                        if (dist < 1.0) color.setHex(0xffffff); // 中心は白
+                        scale = Math.random() * 2.5 + 2.0; // 大きく輝かせる
+                    }
+                    // 2. 隙間を埋めるベース星 (40%)
+                    else if (r < 0.50) {
+                        const dist = (Math.random() * Math.random()) * 25.0 + 2.0;
+                        const angle = Math.random() * Math.PI * 2;
+                        x = Math.cos(angle) * dist;
+                        z = Math.sin(angle) * dist;
+                        y = (Math.random() - 0.5) * 1.5; // ふわっと広げる
+
+                        // 紫〜青のグラデーション
+                        color.copy(colorOuter);
+                        color.lerp(new THREE.Color(0x000033), Math.random());
+                        scale = Math.random() * 1.0 + 0.5; 
+                    }
+                    // 3. メインの腕 (50%)
+                    else {
+                        const armIndex = i % 2; 
+                        const armOffset = Math.PI * armIndex;
+                        const dist = Math.random() * 20.0 + 3.0;
+                        const spiralAngle = dist * 0.45; 
+                        let angle = armOffset + spiralAngle;
+                        
+                        // 散らばり
+                        const spread = (Math.random() - 0.5) * 1.5; 
+                        angle += spread * (0.5 + dist * 0.05);
+
+                        x = Math.cos(angle) * dist;
+                        z = Math.sin(angle) * dist;
+                        y = (Math.random() - 0.5) * 0.8;
+
+                        // 棒接続
+                        if (dist < 5.0) { x *= 1.3; z *= 0.7; }
+
+                        // 鮮やかな色分け
+                        if (Math.random() < 0.2) { 
+                            color.copy(colorPink); // 星雲
+                            scale = Math.random() * 3.0 + 2.0; 
+                            x += (Math.random()-0.5); z += (Math.random()-0.5);
+                        } else {
+                            color.copy(colorArm); // 青い星
+                            color.lerp(colorOuter, (dist - 3.0) / 20.0);
+                            scale = Math.random() * 1.5 + 0.8;
+                        }
+                    }
+
+                    positions[i3] = x;
+                    positions[i3+1] = y;
+                    positions[i3+2] = z;
+
+                    colors[i3] = color.r;
+                    colors[i3+1] = color.g;
+                    colors[i3+2] = color.b;
+
+                    scales[i] = scale;
+                    
+                    randomness[i3] = Math.random()-0.5;
+                    randomness[i3+1] = Math.random()-0.5;
+                    randomness[i3+2] = Math.random()-0.5;
+                }
+
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
+                geometry.setAttribute('aScale', new THREE.BufferAttribute(scales, 1));
+                geometry.setAttribute('aRandomness', new THREE.BufferAttribute(randomness, 3));
+
+                this.material = new THREE.ShaderMaterial({
+                    uniforms: {
+                        uTime: { value: 0 },
+                        uSize: { value: CONFIG.particleSize },
+                        uExpansion: { value: 0 }
+                    },
+                    vertexShader: starVertexShader,
+                    fragmentShader: starFragmentShader,
+                    transparent: true,
+                    depthWrite: false,
+                    blending: THREE.AdditiveBlending
+                });
+
+                this.points = new THREE.Points(geometry, this.material);
+                this.points.rotation.x = -0.5; 
+                this.points.rotation.z = -0.1; 
+                this.scene.add(this.points);
+            }
+
+            initBackgroundStars() {
+                const count = CONFIG.bgStarCount;
+                const positions = new Float32Array(count * 3);
+                const colors = new Float32Array(count * 3);
+
+                for(let i=0; i<count; i++) {
+                    const r = 500 + Math.random() * 500; 
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos((Math.random() * 2) - 1);
+                    
+                    positions[i*3] = r * Math.sin(phi) * Math.cos(theta);
+                    positions[i*3+1] = r * Math.sin(phi) * Math.sin(theta);
+                    positions[i*3+2] = r * Math.cos(phi);
+
+                    // 背景の星もカラフルに
+                    const c = new THREE.Color().setHSL(Math.random(), 0.5, 0.8);
+                    colors[i*3] = c.r; colors[i*3+1] = c.g; colors[i*3+2] = c.b;
+                }
+
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                
+                const material = new THREE.PointsMaterial({
+                    size: 1.5,
+                    vertexColors: true,
+                    transparent: true,
+                    opacity: 0.8,
+                    sizeAttenuation: false 
+                });
+
+                this.bgStars = new THREE.Points(geometry, material);
+                this.scene.add(this.bgStars);
+            }
+
+            initPostProcessing() {
+                this.composer = new EffectComposer(this.renderer);
+                this.composer.addPass(new RenderPass(this.scene, this.camera));
+                
+                // ブルームを強めにかけて、夢のような雰囲気に
+                this.bloomPass = new UnrealBloomPass(new THREE.Vector2(this.width, this.height), 1.5, 0.4, 0.85);
+                this.bloomPass.strength = CONFIG.bloomStrength;
+                this.bloomPass.radius = CONFIG.bloomRadius;
+                this.composer.addPass(this.bloomPass);
+            }
+
+            initMediaPipe() {
+                const video = document.getElementById('video-element');
+                const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                hands.onResults(this.onHandsResults.bind(this));
+                const camera = new Camera(video, {
+                    onFrame: async () => await hands.send({image: video}),
+                    width: 640, height: 480
+                });
+                camera.start().catch(e => console.log(e));
+            }
+
+            onHandsResults(results) {
+                let newTargetDistance = 0;
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const lms = results.multiHandLandmarks;
+                    if (lms.length === 2) {
+                        const dist = Math.sqrt(Math.pow(lms[0][9].x - lms[1][9].x, 2) + Math.pow(lms[0][9].y - lms[1][9].y, 2));
+                        newTargetDistance = THREE.MathUtils.clamp((dist - 0.1) * 2.5, 0, 2.0);
+                    }
+                }
+                STATE.targetHandDistance = newTargetDistance;
+            }
+
+            initGUI() {
+                const gui = new GUI({ title: 'Cinematic Settings' });
+                gui.domElement.style.marginTop = "60px";
+                const visual = gui.addFolder('Visuals');
+                visual.add(CONFIG, 'bloomStrength', 0, 3).name('Glow').onChange(v => this.bloomPass.strength = v);
+                visual.add(CONFIG, 'particleSize', 0.1, 5).name('Star Size').onChange(v => this.material.uniforms.uSize.value = v);
+                visual.add(CONFIG, 'rotationSpeed', 0, 0.05).name('Speed');
+            }
+
+            onResize() {
+                this.width = window.innerWidth;
+                this.height = window.innerHeight;
+                this.camera.aspect = this.width / this.height;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(this.width, this.height);
+                this.composer.setSize(this.width, this.height);
+            }
+
+            animate() {
+                requestAnimationFrame(this.animate);
+                const time = this.clock.getElapsedTime();
+
+                STATE.handDistance += (STATE.targetHandDistance - STATE.handDistance) * 0.05;
+
+                // 銀河更新
+                this.material.uniforms.uTime.value = time;
+                this.material.uniforms.uExpansion.value = STATE.handDistance;
+                this.points.rotation.y -= CONFIG.rotationSpeed; 
+
+                // 背景シェーダー更新
+                this.bgMaterial.uniforms.uTime.value = time;
+
+                this.composer.render();
+            }
+        }
+        new ParticleSystem();
+    </script>
+</body>
+</html>
